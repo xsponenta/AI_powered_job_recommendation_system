@@ -4,3 +4,7 @@ Our idea aims to reduce these barriers by providing convenient, data-driven reco
 
 ### Requirements
 All of the needed requirements will be stored in requirements.txt, to install them simply run ```pip install -r requirements.txt```
+
+### Dataset 
+We used Resume Dataset for Kaggle:
+https://www.kaggle.com/datasets/snehaanbhawal/resume-dataset/

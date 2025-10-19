@@ -4,3 +4,8 @@ pandas
 scikit-learn
 numpy
 scipy
+tqdm
+torch
+transformers
+bitsandbytes
+accelerate
