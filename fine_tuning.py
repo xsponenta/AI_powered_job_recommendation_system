@@ -17,10 +17,6 @@ class UkrT5:
         self.logger.debug("Initializing UkrT5 with model_id=%s", model_id)
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
 
-        # 4-bit quantization setup
-        # Choose compute dtype based on hardware support. Using bf16 for compute
-        # while training with fp16 can produce dtype mismatches and NaNs when
-        # autocast is set to float16. Prefer float16 when bf16 not available.
         try:
             use_bf16 = torch.cuda.is_bf16_supported()
         except Exception:
@@ -62,14 +58,12 @@ class UkrT5:
         dataset = self.format_dataset(dataset_path)
         self.logger.info("Dataset size: %d", len(dataset))
 
-        # choose mixed precision flags to match the BitsAndBytes compute dtype
         bf16_arg = False
         fp16_arg = False
         try:
             bf16_arg = torch.cuda.is_bf16_supported()
         except Exception:
             bf16_arg = False
-        # enable fp16 only if CUDA is available and bf16 is not supported
         fp16_arg = torch.cuda.is_available() and not bf16_arg
 
         training_args = TrainingArguments(
@@ -122,11 +116,9 @@ class UkrT5:
         self.logger.info("Loading dataset from %s", csv_path)
         dataset = load_dataset("json", data_files=csv_path, split="train")
 
-        # Step 1: Create input_text / target_text
         self.logger.debug("Mapping prompts to dataset")
         dataset = dataset.map(lambda x: self.format_prompts(x, self.tokenizer))
 
-        # Step 2: Tokenize inputs and labels
         def tokenize_function(batch):
             tokenized = self.tokenizer(
                 batch["input_text"],
@@ -135,7 +127,6 @@ class UkrT5:
                 truncation=True,
                 max_length=512,
             )
-            # Replace padding token id in labels with -100
             tokenized["labels"] = [
                 [(l if l != self.tokenizer.pad_token_id else -100) for l in labels]
                 for labels in tokenized["labels"]
@@ -144,7 +135,6 @@ class UkrT5:
         self.logger.debug("Tokenizing dataset (batched)")
         dataset = dataset.map(tokenize_function, batched=True)
 
-        # Remove original text columns
         remove_cols = ["input_text", "target_text", "category", "info", "resume"]
         dataset = dataset.remove_columns([c for c in remove_cols if c in dataset.column_names])
         self.logger.info("Finished formatting dataset. columns now: %s", dataset.column_names)
