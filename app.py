@@ -4,10 +4,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QLabel, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QProgressBar
 )
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QThread, Signal, QUrl
+from PySide6.QtGui import QDesktopServices
+import os
 
 from core.job_recommender import recommend_jobs
 from core.cv_generator import generate_cv
+from core.pdf_writer import generate_resume_pdf_from_text
 
 
 class JobWorker(QThread):
@@ -34,8 +37,13 @@ class CVWorker(QThread):
         self.profile = profile
 
     def run(self):
-        text = generate_cv(self.profile)
-        self.finished.emit(text)
+        raw_text = generate_cv(self.profile)
+
+        output_path = "generated_resume.pdf"
+        generate_resume_pdf_from_text(raw_text, output_path)
+
+        self.finished.emit(output_path)
+
 
 
 class ProfileTab(QWidget):
@@ -167,23 +175,33 @@ class CVTab(QWidget):
 
         layout = QVBoxLayout()
 
-        self.generate_btn = QPushButton("Generate CV")
-        self.output = QTextEdit()
-        self.output.setReadOnly(True)
+        self.generate_btn = QPushButton("Generate CV (PDF)")
+        self.status = QLabel("")
+        self.status.setStyleSheet("color: gray")
 
         self.generate_btn.clicked.connect(self.generate)
 
         layout.addWidget(self.generate_btn)
-        layout.addWidget(self.output)
+        layout.addWidget(self.status)
         self.setLayout(layout)
 
     def generate(self):
         profile = self.profile_tab.get_profile()
 
-        self.output.setPlainText("Generating CV… please wait")
+        self.status.setText("Generating CV PDF… please wait")
+        self.generate_btn.setEnabled(False)
+
         self.worker = CVWorker(profile)
-        self.worker.finished.connect(self.output.setPlainText)
+        self.worker.finished.connect(self.open_pdf)
         self.worker.start()
+
+    def open_pdf(self, pdf_path: str):
+        self.status.setText("CV generated")
+        self.generate_btn.setEnabled(True)
+
+        abs_path = os.path.abspath(pdf_path)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(abs_path))
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
