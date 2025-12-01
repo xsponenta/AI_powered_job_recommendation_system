@@ -1,23 +1,41 @@
 import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget,
-    QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit,
+    QVBoxLayout, QLabel, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QProgressBar
 )
 from PySide6.QtCore import QThread, Signal
+
 from core.job_recommender import recommend_jobs
+from core.cv_generator import generate_cv
 
 
 class JobWorker(QThread):
     finished = Signal(object)
 
-    def __init__(self, query):
+    def __init__(self, title: str, skills: str):
         super().__init__()
-        self.query = query
+        self.title = title or ""
+        self.skills = skills or ""
 
     def run(self):
-        result = recommend_jobs(self.query)
-        self.finished.emit(result)
+        df = recommend_jobs(
+            title=self.title,
+            skills=self.skills
+        )
+        self.finished.emit(df)
+
+
+class CVWorker(QThread):
+    finished = Signal(str)
+
+    def __init__(self, profile: dict):
+        super().__init__()
+        self.profile = profile
+
+    def run(self):
+        text = generate_cv(self.profile)
+        self.finished.emit(text)
 
 
 class ProfileTab(QWidget):
@@ -25,24 +43,42 @@ class ProfileTab(QWidget):
         super().__init__()
         layout = QVBoxLayout()
 
-        self.role = QLineEdit()
+        self.position = QLineEdit()
         self.skills = QTextEdit()
         self.summary = QTextEdit()
+        self.looking_for = QTextEdit()
+        self.highlights = QTextEdit()
+        self.primary_keyword = QLineEdit()
 
-        layout.addWidget(QLabel("Target Role / Keywords"))
-        layout.addWidget(self.role)
+        layout.addWidget(QLabel("Target Role"))
+        layout.addWidget(self.position)
 
         layout.addWidget(QLabel("Skills (comma separated)"))
         layout.addWidget(self.skills)
 
-        layout.addWidget(QLabel("Professional Summary"))
+        layout.addWidget(QLabel("More info / Summary"))
         layout.addWidget(self.summary)
+
+        layout.addWidget(QLabel("Looking For"))
+        layout.addWidget(self.looking_for)
+
+        layout.addWidget(QLabel("Highlights"))
+        layout.addWidget(self.highlights)
+
+        layout.addWidget(QLabel("Primary Keyword"))
+        layout.addWidget(self.primary_keyword)
 
         self.setLayout(layout)
 
-    def build_query(self):
-        return f"{self.role.text() if self.role.text() else ""} {self.skills.toPlainText()}"
-
+    def get_profile(self) -> dict:
+        return {
+            "position": self.position.text().strip(),
+            "skills": self.skills.toPlainText().strip(),
+            "summary": self.summary.toPlainText().strip(),
+            "looking_for": self.looking_for.toPlainText().strip(),
+            "highlights": self.highlights.toPlainText().strip(),
+            "primary_keyword": self.primary_keyword.text().strip(),
+        }
 
 class JobsTab(QWidget):
     def __init__(self, profile_tab: ProfileTab):
@@ -58,7 +94,7 @@ class JobsTab(QWidget):
 
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
-            ["Title", "Company", "Source", "Score", "URL"]
+            ["Title", "Company", "Source", "Match %", "URL"]
         )
 
         self.fetch_btn.clicked.connect(self.fetch_jobs)
@@ -68,15 +104,50 @@ class JobsTab(QWidget):
         layout.addWidget(self.table)
         self.setLayout(layout)
 
+    def build_job_query_from_profile(self, profile: dict) -> dict:
+        """
+        Builds queries for job fetching & ranking
+        from all profile fields.
+        """
+
+        title = profile.get("position", "").strip()
+
+        # Everything else contributes to semantic matching
+        semantic_parts = [
+            profile.get("skills", ""),
+            profile.get("summary", ""),
+            profile.get("looking_for", ""),
+            profile.get("highlights", ""),
+            profile.get("primary_keyword", ""),
+        ]
+
+        semantic_query = " ".join(p for p in semantic_parts if p).strip()
+
+        return {
+            "title": title,
+            "semantic": semantic_query,
+        }
+
+
     def fetch_jobs(self):
-        query = self.profile_tab.build_query()
-        if not query.strip():
+        profile = self.profile_tab.get_profile()
+
+        queries = self.build_job_query_from_profile(profile)
+        title = queries["title"]
+        semantic = queries["semantic"]
+
+        if not title and not semantic:
             return
 
         self.progress.show()
-        self.worker = JobWorker(query)
+
+        self.worker = JobWorker(
+            title=title,
+            skills=semantic   # semantic context goes here
+        )
         self.worker.finished.connect(self.display_jobs)
         self.worker.start()
+
 
     def display_jobs(self, df):
         self.progress.hide()
@@ -86,9 +157,8 @@ class JobsTab(QWidget):
             self.table.setItem(row, 0, QTableWidgetItem(job["title"]))
             self.table.setItem(row, 1, QTableWidgetItem(job["company"]))
             self.table.setItem(row, 2, QTableWidgetItem(job["source"]))
-            self.table.setItem(row, 3, QTableWidgetItem(f"{job['score']:.3f}"))
+            self.table.setItem(row, 3, QTableWidgetItem(f"{job['score']:.1f}%"))
             self.table.setItem(row, 4, QTableWidgetItem(job["url"]))
-
 
 class CVTab(QWidget):
     def __init__(self, profile_tab: ProfileTab):
@@ -96,28 +166,24 @@ class CVTab(QWidget):
         self.profile_tab = profile_tab
 
         layout = QVBoxLayout()
-        self.generate_btn = QPushButton("Generate CV (text)")
+
+        self.generate_btn = QPushButton("Generate CV")
         self.output = QTextEdit()
         self.output.setReadOnly(True)
 
-        self.generate_btn.clicked.connect(self.generate_cv)
+        self.generate_btn.clicked.connect(self.generate)
 
         layout.addWidget(self.generate_btn)
         layout.addWidget(self.output)
         self.setLayout(layout)
 
-    def generate_cv(self):
-        text = f"""
-{self.profile_tab.role.text()}
+    def generate(self):
+        profile = self.profile_tab.get_profile()
 
-Skills:
-{self.profile_tab.skills.toPlainText()}
-
-Summary:
-{self.profile_tab.summary.toPlainText()}
-"""
-        self.output.setPlainText(text.strip())
-
+        self.output.setPlainText("Generating CV… please wait")
+        self.worker = CVWorker(profile)
+        self.worker.finished.connect(self.output.setPlainText)
+        self.worker.start()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -140,6 +206,6 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    win = MainWindow()
-    win.show()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec())
