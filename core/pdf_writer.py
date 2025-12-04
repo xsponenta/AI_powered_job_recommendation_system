@@ -1,4 +1,18 @@
 import fitz
+import re
+
+PLACEHOLDER_PATTERNS = [
+    r"\[optional:.*?\]",
+    r"\[if you have.*?\]",
+    r"\[add another.*?\]",
+    r"\[your .*?\]",
+    r"\(mention .*?\)",
+]
+
+def remove_placeholders(text: str) -> str:
+    for pat in PLACEHOLDER_PATTERNS:
+        text = re.sub(pat, "", text, flags=re.IGNORECASE)
+    return text
 
 def clean_text_for_pdf(text):
     """
@@ -19,6 +33,7 @@ def clean_text_for_pdf(text):
     return text
 
 def parse_resume_robust(raw_text):
+    raw_text = remove_placeholders(raw_text)
     lines = raw_text.split('\n')
 
     data = {
@@ -113,12 +128,38 @@ def create_resume_pdf(parsed_data, output_filename="generated_resume.pdf"):
         height_inc = lines_count * size * 1.4
         y_position += height_inc + 1
 
-    if parsed_data["header"]:
-        write_text(parsed_data["header"][0], 18, font_bold)
-        y_position += 1
-        contact_info = " | ".join(parsed_data["header"][1:])
-        write_text(contact_info, 10, font_reg)
-        y_position += 5
+        profile = parsed_data.get("profile", {})
+
+        header_line = profile.get("full_name", "")
+        if header_line:
+            write_text(header_line, 18, font_bold)
+
+        contact_parts = []
+        for key in ["location", "phone", "email", "linkedin", "github"]:
+            val = profile.get(key)
+            if val:
+                contact_parts.append(val)
+
+        if contact_parts:
+            write_text(" | ".join(contact_parts), 10, font_reg)
+
+        y_position += 6
+
+        edu = profile.get("education", {})
+        if any(edu.values()):
+            write_text("EDUCATION", 12, font_bold)
+            page.draw_line((margin_left, y_position-2), (width - margin_right, y_position-2))
+            y_position += 4
+
+            edu_line = " | ".join(v for v in [
+                edu.get("degree"),
+                edu.get("university"),
+                edu.get("year")
+            ] if v)
+
+            write_text(edu_line, 10, font_reg)
+            y_position += 6
+
 
     for section, lines in parsed_data["sections"].items():
         check_page_break(30)

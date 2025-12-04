@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QLabel, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QProgressBar
 )
-from PySide6.QtCore import QThread, Signal, QUrl
+from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 import os
 
@@ -57,6 +57,42 @@ class ProfileTab(QWidget):
         self.looking_for = QTextEdit()
         self.highlights = QTextEdit()
         self.primary_keyword = QLineEdit()
+        self.full_name = QLineEdit()
+        self.location = QLineEdit()
+        self.email = QLineEdit()
+        self.phone = QLineEdit()
+        self.linkedin = QLineEdit()
+        self.github = QLineEdit()
+        self.degree = QLineEdit()
+        self.university = QLineEdit()
+        self.grad_year = QLineEdit()
+
+        layout.addWidget(QLabel("Full Name"))
+        layout.addWidget(self.full_name)
+
+        layout.addWidget(QLabel("Location (City, Country)"))
+        layout.addWidget(self.location)
+
+        layout.addWidget(QLabel("Email"))
+        layout.addWidget(self.email)
+
+        layout.addWidget(QLabel("Phone"))
+        layout.addWidget(self.phone)
+
+        layout.addWidget(QLabel("LinkedIn URL"))
+        layout.addWidget(self.linkedin)
+
+        layout.addWidget(QLabel("GitHub URL"))
+        layout.addWidget(self.github)
+
+        layout.addWidget(QLabel("Degree"))
+        layout.addWidget(self.degree)
+
+        layout.addWidget(QLabel("University"))
+        layout.addWidget(self.university)
+
+        layout.addWidget(QLabel("Graduation Year"))
+        layout.addWidget(self.grad_year)
 
         layout.addWidget(QLabel("Target Role"))
         layout.addWidget(self.position)
@@ -80,6 +116,21 @@ class ProfileTab(QWidget):
 
     def get_profile(self) -> dict:
         return {
+            # --- personal info ---
+            "full_name": self.full_name.text().strip(),
+            "location": self.location.text().strip(),
+            "email": self.email.text().strip(),
+            "phone": self.phone.text().strip(),
+            "linkedin": self.linkedin.text().strip(),
+            "github": self.github.text().strip(),
+
+            "education": {
+                "degree": self.degree.text().strip(),
+                "university": self.university.text().strip(),
+                "year": self.grad_year.text().strip(),
+            },
+
+            # --- content for model ---
             "position": self.position.text().strip(),
             "skills": self.skills.toPlainText().strip(),
             "summary": self.summary.toPlainText().strip(),
@@ -87,6 +138,7 @@ class ProfileTab(QWidget):
             "highlights": self.highlights.toPlainText().strip(),
             "primary_keyword": self.primary_keyword.text().strip(),
         }
+
 
 class JobsTab(QWidget):
     def __init__(self, profile_tab: ProfileTab):
@@ -169,38 +221,74 @@ class JobsTab(QWidget):
             self.table.setItem(row, 4, QTableWidgetItem(job["url"]))
 
 class CVTab(QWidget):
-    def __init__(self, profile_tab: ProfileTab):
+    def __init__(self, profile_tab):
         super().__init__()
         self.profile_tab = profile_tab
+        self.pdf_path = None
 
         layout = QVBoxLayout()
 
         self.generate_btn = QPushButton("Generate CV (PDF)")
         self.status = QLabel("")
-        self.status.setStyleSheet("color: gray")
+        self.status.setWordWrap(True)
+
+        self.path_label = QLabel("")
+        self.path_label.setOpenExternalLinks(False)
+        self.path_label.setTextInteractionFlags(
+            self.path_label.textInteractionFlags() | 
+            Qt.TextSelectableByMouse
+        )
+
+        self.open_btn = QPushButton("Open PDF")
+        self.folder_btn = QPushButton("Show in Folder")
+
+        self.open_btn.setEnabled(False)
+        self.folder_btn.setEnabled(False)
 
         self.generate_btn.clicked.connect(self.generate)
+        self.open_btn.clicked.connect(self.open_pdf)
+        self.folder_btn.clicked.connect(self.open_folder)
 
         layout.addWidget(self.generate_btn)
         layout.addWidget(self.status)
+        layout.addWidget(self.path_label)
+        layout.addWidget(self.open_btn)
+        layout.addWidget(self.folder_btn)
+
         self.setLayout(layout)
 
     def generate(self):
         profile = self.profile_tab.get_profile()
 
         self.status.setText("Generating CV PDF… please wait")
+        self.path_label.setText("")
         self.generate_btn.setEnabled(False)
+        self.open_btn.setEnabled(False)
+        self.folder_btn.setEnabled(False)
 
         self.worker = CVWorker(profile)
-        self.worker.finished.connect(self.open_pdf)
+        self.worker.finished.connect(self.on_pdf_ready)
         self.worker.start()
 
-    def open_pdf(self, pdf_path: str):
-        self.status.setText("CV generated")
-        self.generate_btn.setEnabled(True)
+    def on_pdf_ready(self, pdf_path: str):
+        self.pdf_path = os.path.abspath(pdf_path)
 
-        abs_path = os.path.abspath(pdf_path)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(abs_path))
+        self.status.setText("CV generated successfully ✔")
+        self.path_label.setText(f"<b>Saved to:</b><br>{self.pdf_path}")
+
+        self.generate_btn.setEnabled(True)
+        self.open_btn.setEnabled(True)
+        self.folder_btn.setEnabled(True)
+
+    def open_pdf(self):
+        if self.pdf_path:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(self.pdf_path))
+
+    def open_folder(self):
+        if self.pdf_path:
+            folder = os.path.dirname(self.pdf_path)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(folder))
+
 
 
 class MainWindow(QMainWindow):
