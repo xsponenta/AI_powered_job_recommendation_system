@@ -2,16 +2,22 @@ import sys
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget,
     QVBoxLayout, QLabel, QLineEdit, QTextEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QProgressBar
+    QPushButton, QTableWidget, QTableWidgetItem, 
+    QProgressBar, QScrollArea, QCheckBox, QGroupBox
 )
 from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
 import os
 
-from core.job_recommender import recommend_jobs
+from core.rag_engine import recommender
 from core.cv_generator import generate_cv
 from core.pdf_writer import generate_resume_pdf_from_text
 
+def make_scrollable(widget: QWidget) -> QWidget:
+    scroll = QScrollArea()
+    scroll.setWidgetResizable(True)
+    scroll.setWidget(widget)
+    return scroll
 
 class JobWorker(QThread):
     finished = Signal(object)
@@ -22,15 +28,22 @@ class JobWorker(QThread):
         self.skills = skills or ""
 
     def run(self):
-        df = recommend_jobs(
-            title=self.title,
-            skills=self.skills
+        query = self.title or self.skills
+
+        ok = recommender.ingest(query)
+        if not ok:
+            self.finished.emit([])
+            return
+
+        df = recommender.search(
+            semantic_query=self.skills or self.title,
+            top_k=30
         )
         self.finished.emit(df)
 
 
 class CVWorker(QThread):
-    finished = Signal(str)
+    finished = Signal(str, str)
 
     def __init__(self, profile: dict):
         super().__init__()
@@ -40,9 +53,9 @@ class CVWorker(QThread):
         raw_text = generate_cv(self.profile)
 
         output_path = "generated_resume.pdf"
-        generate_resume_pdf_from_text(raw_text, output_path)
+        generate_resume_pdf_from_text(raw_text, self.profile, output_path)
 
-        self.finished.emit(output_path)
+        self.finished.emit(output_path, raw_text)
 
 
 
@@ -66,6 +79,8 @@ class ProfileTab(QWidget):
         self.degree = QLineEdit()
         self.university = QLineEdit()
         self.grad_year = QLineEdit()
+        self.has_experience = QCheckBox("I have professional work experience")
+        self.has_experience.setChecked(False)
 
         layout.addWidget(QLabel("Full Name"))
         layout.addWidget(self.full_name)
@@ -94,6 +109,35 @@ class ProfileTab(QWidget):
         layout.addWidget(QLabel("Graduation Year"))
         layout.addWidget(self.grad_year)
 
+        layout.addWidget(self.has_experience)
+        self.exp_group = QGroupBox("Professional Experience")
+        self.exp_layout = QVBoxLayout()
+
+        self.company = QLineEdit()
+        self.job_title = QLineEdit()
+        self.employment_type = QLineEdit()
+        self.years = QLineEdit()
+
+        self.exp_layout.addWidget(QLabel("Company"))
+        self.exp_layout.addWidget(self.company)
+
+        self.exp_layout.addWidget(QLabel("Position"))
+        self.exp_layout.addWidget(self.job_title)
+
+        self.exp_layout.addWidget(QLabel("Employment Type (e.g. Full-time, Internship)"))
+        self.exp_layout.addWidget(self.employment_type)
+
+        self.exp_layout.addWidget(QLabel("Years (e.g. 2023–2025)"))
+        self.exp_layout.addWidget(self.years)
+
+        self.exp_group.setLayout(self.exp_layout)
+        self.exp_group.setVisible(False)
+
+        layout.addWidget(self.exp_group)
+
+        self.has_experience.toggled.connect(self.exp_group.setVisible)
+
+
         layout.addWidget(QLabel("Target Role"))
         layout.addWidget(self.position)
 
@@ -116,7 +160,7 @@ class ProfileTab(QWidget):
 
     def get_profile(self) -> dict:
         return {
-            # --- personal info ---
+            # ---------- PERSONAL INFO ----------
             "full_name": self.full_name.text().strip(),
             "location": self.location.text().strip(),
             "email": self.email.text().strip(),
@@ -124,13 +168,24 @@ class ProfileTab(QWidget):
             "linkedin": self.linkedin.text().strip(),
             "github": self.github.text().strip(),
 
+            # ---------- EDUCATION ----------
             "education": {
                 "degree": self.degree.text().strip(),
                 "university": self.university.text().strip(),
                 "year": self.grad_year.text().strip(),
             },
 
-            # --- content for model ---
+            # ---------- FLAGS ----------
+            "has_experience": self.has_experience.isChecked(),
+
+            "profile_experience": {
+                "company": self.company.text().strip(),
+                "position": self.job_title.text().strip(),
+                "type": self.employment_type.text().strip(),
+                "years": self.years.text().strip(),
+            } if self.has_experience.isChecked() else None,
+
+            # --- MODEL INPUT ---
             "position": self.position.text().strip(),
             "skills": self.skills.toPlainText().strip(),
             "summary": self.summary.toPlainText().strip(),
@@ -239,6 +294,14 @@ class CVTab(QWidget):
             Qt.TextSelectableByMouse
         )
 
+        self.raw_preview = QTextEdit()
+        self.raw_preview.setReadOnly(True)
+        self.raw_preview.setPlaceholderText("Raw model output will appear here…")
+
+        layout.addWidget(QLabel("Model Output (Debug)"))
+        layout.addWidget(self.raw_preview)
+
+
         self.open_btn = QPushButton("Open PDF")
         self.folder_btn = QPushButton("Show in Folder")
 
@@ -267,14 +330,15 @@ class CVTab(QWidget):
         self.folder_btn.setEnabled(False)
 
         self.worker = CVWorker(profile)
-        self.worker.finished.connect(self.on_pdf_ready)
+        self.worker.finished.connect(self.on_result_ready)
         self.worker.start()
 
-    def on_pdf_ready(self, pdf_path: str):
+    def on_result_ready(self, pdf_path: str, raw_text: str):
         self.pdf_path = os.path.abspath(pdf_path)
 
         self.status.setText("CV generated successfully ✔")
         self.path_label.setText(f"<b>Saved to:</b><br>{self.pdf_path}")
+        self.raw_preview.setPlainText(raw_text)
 
         self.generate_btn.setEnabled(True)
         self.open_btn.setEnabled(True)
@@ -303,9 +367,9 @@ class MainWindow(QMainWindow):
         self.jobs_tab = JobsTab(self.profile_tab)
         self.cv_tab = CVTab(self.profile_tab)
 
-        tabs.addTab(self.profile_tab, "Profile")
-        tabs.addTab(self.jobs_tab, "Jobs")
-        tabs.addTab(self.cv_tab, "CV")
+        tabs.addTab(make_scrollable(self.profile_tab), "Profile")
+        tabs.addTab(make_scrollable(self.jobs_tab), "Jobs")
+        tabs.addTab(make_scrollable(self.cv_tab), "CV")
 
         self.setCentralWidget(tabs)
 
