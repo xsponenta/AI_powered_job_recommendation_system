@@ -1,238 +1,161 @@
 import fitz
 import re
 
-
-# -------------------------
-# Cleaning helpers
-# -------------------------
-
 PLACEHOLDER_PATTERNS = [
-    r"\[.*?optional.*?\]",
-    r"\[.*?add.*?\]",
-    r"\[.*?replace.*?\]",
-    r"\[.*?company name.*?\]",
-    r"\[.*?job title.*?\]",
-    r"\[.*?dates.*?\]",
-    r"\[.*?\]",
+    r"\[optional:.*?\]",
+    r"\[if you have.*?\]",
+    r"\[add another.*?\]",
+    r"\[your .*?\]",
+    r"\(mention .*?\)",
 ]
 
-def clean_placeholders(text: str) -> str:
+def remove_placeholders(text: str) -> str:
     for pat in PLACEHOLDER_PATTERNS:
         text = re.sub(pat, "", text, flags=re.IGNORECASE)
     return text
 
 
-def clean_text(text: str) -> str:
-    return (
-        text.replace("\u2013", "-")
-        .replace("\u2014", "-")
-        .replace("\u2018", "'")
-        .replace("\u2019", "'")
-        .replace("\u201c", '"')
-        .replace("\u201d", '"')
-    )
+def clean_text_for_pdf(text: str) -> str:
+    replacements = {
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+        "\u2022": "*",
+        "**": "",
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    return text
 
+def parse_resume_robust(raw_text: str):
+    raw_text = remove_placeholders(raw_text)
+    lines = raw_text.split("\n")
 
-# -------------------------
-# Resume parser (LLM output)
-# -------------------------
+    data = {
+        "sections": {}
+    }
 
-def parse_resume(raw_text: str):
-    raw_text = clean_placeholders(raw_text)
-    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    KNOWN_HEADERS = {
+        "summary": "SUMMARY",
+        "experience": "EXPERIENCE",
+        "education": "EDUCATION",
+        "skills": "SKILLS",
+        "projects": "PROJECTS",
+        "languages": "LANGUAGES",
+        "certifications": "CERTIFICATIONS",
+        "technical skills": "SKILLS",
+    }
 
-    sections = {}
-    current = None
+    current_section = None
 
     for line in lines:
-        key = line.upper().replace(":", "")
-        if key in {"SUMMARY", "SKILLS", "EXPERIENCE", "PROJECTS", "EDUCATION"}:
-            current = key
-            sections[current] = []
+        line = line.strip()
+        if not line:
             continue
 
-        if current:
-            sections[current].append(line)
+        clean = line.replace("*", "").replace(":", "").strip().lower()
 
-    return sections
+        if clean in KNOWN_HEADERS:
+            current_section = KNOWN_HEADERS[clean]
+            data["sections"][current_section] = []
+            continue
 
+        if clean in {"plan", "resume"}:
+            continue
 
-# -------------------------
-# PDF generator
-# -------------------------
+        if current_section:
+            data["sections"][current_section].append(line)
 
-def generate_resume_pdf_from_text(raw_text: str, profile: dict, out_path: str):
+    return data
+
+def create_resume_pdf(parsed_data, profile: dict, output_filename="generated_resume.pdf"):
     doc = fitz.open()
     page = doc.new_page()
 
-    W, H = page.rect.width, page.rect.height
-    MARGIN_X = 50
-    Y = 50
+    width, height = page.rect.width, page.rect.height
 
-    FONT = "Helvetica"
-    FONT_BOLD = "Helvetica-Bold"
+    margin_left = 50
+    margin_right = 50
+    margin_top = 50
+    y = margin_top
 
-    def new_page_if_needed(h=40):
-        nonlocal page, Y
-        if Y + h > H - 50:
+    font_reg = "Helvetica"
+    font_bold = "Helvetica-Bold"
+
+    def check_page_break(extra=40):
+        nonlocal page, y
+        if y + extra > height - 50:
             page = doc.new_page()
-            Y = 50
+            y = margin_top
 
-    def write(text, size=10, bold=False, indent=0):
-        nonlocal Y, page
-        text = clean_text(text)
-        font = FONT_BOLD if bold else FONT
+    def write_text(text, size=10, font=font_reg, indent=0):
+        nonlocal y
+        text = clean_text_for_pdf(text)
+        rect = fitz.Rect(
+            margin_left + indent,
+            y,
+            width - margin_right,
+            height - 50,
+        )
 
-        max_width = W - MARGIN_X * 2 - indent
-        words = text.split()
-        line = ""
+        check_page_break()
 
-        for word in words:
-            test = (line + " " + word).strip()
-            if fitz.get_text_length(test, fontname=font, fontsize=size) <= max_width:
-                line = test
-            else:
-                if Y > H - 60:
-                    page = doc.new_page()
-                    Y = 50
+        page.insert_textbox(
+            rect,
+            text,
+            fontsize=size,
+            fontname=font,
+            align=0,
+        )
 
-                page.insert_text(
-                    (MARGIN_X + indent, Y),
-                    line,
-                    fontsize=size,
-                    fontname=font,
-                )
-                Y += size * 1.4
-                line = word
+        y += size * (text.count("\n") + 1) * 1.5
 
-        if line:
-            if Y > H - 60:
-                page = doc.new_page()
-                Y = 50
+    full_name = profile.get("full_name", "")
+    if full_name:
+        write_text(full_name, 18, font_bold)
 
-            page.insert_text(
-                (MARGIN_X + indent, Y),
-                line,
-                fontsize=size,
-                fontname=font,
-            )
-            Y += size * 1.6
+    contact_parts = []
+    for key in ["location", "phone", "email", "linkedin", "github"]:
+        val = profile.get(key)
+        if val:
+            contact_parts.append(val)
 
+    if contact_parts:
+        write_text(" | ".join(contact_parts), 10, font_reg)
 
+    y += 15
 
-    def section(title):
-        nonlocal Y
-        new_page_if_needed(40)
-        write(title, size=12, bold=True)
+    for section, lines in parsed_data["sections"].items():
+        check_page_break(30)
+
+        write_text(section.upper(), 12, font_bold)
         page.draw_line(
-            (MARGIN_X, Y - 4),
-            (W - MARGIN_X, Y - 4),
+            (margin_left, y - 3),
+            (width - margin_right, y - 3),
         )
-        Y += 8
+        y += 10
 
-    # -------------------------
-    # HEADER
-    # -------------------------
-
-    write(profile.get("full_name", ""), size=18, bold=True)
-
-    contact = " | ".join(
-        v for v in [
-            profile.get("location"),
-            profile.get("phone"),
-            profile.get("email"),
-            profile.get("linkedin"),
-            profile.get("github"),
-        ]
-        if v
-    )
-    if contact:
-        write(contact, size=10)
-
-    Y += 10
-
-    # -------------------------
-    # EDUCATION (ONLY FROM PROFILE)
-    # -------------------------
-
-    edu = profile.get("education", {})
-    if any(edu.values()):
-        section("EDUCATION")
-        edu_line = " | ".join(
-            v for v in [
-                edu.get("degree"),
-                edu.get("university"),
-                edu.get("year"),
-            ]
-            if v
-        )
-        write(edu_line)
-
-    # -------------------------
-    # PARSE MODEL CONTENT
-    # -------------------------
-
-    sections = parse_resume(raw_text)
-
-    # -------------------------
-    # SUMMARY
-    # -------------------------
-
-    if "SUMMARY" in sections:
-        section("SUMMARY")
-        for line in sections["SUMMARY"]:
-            write(line)
-
-    # -------------------------
-    # SKILLS
-    # -------------------------
-
-    if "SKILLS" in sections:
-        section("SKILLS")
-        for line in sections["SKILLS"]:
-            if "university name" in line.lower():
-                continue
-            write("• " + line.lstrip("*- "), indent=12)
-
-    # -------------------------
-    # EXPERIENCE
-    # -------------------------
-
-    section("EXPERIENCE")
-
-    exp = profile.get("profile_experience")
-
-    if exp:
-        header = " | ".join(
-            v for v in [
-                exp.get("company"),
-                exp.get("position"),
-                exp.get("type"),
-                exp.get("years"),
-            ]
-            if v
-        )
-        write(header, bold=True)
-
-    if "EXPERIENCE" in sections:
-        for line in sections["EXPERIENCE"]:
-            if "education" in line.lower():
+        for line in lines:
+            line = line.strip()
+            if not line:
                 continue
             if line.startswith("*") or line.startswith("-"):
-                write("• " + line.lstrip("*- "), indent=12)
+                txt = line.lstrip("*- ").strip()
+                write_text(f"• {txt}", 10, font_reg, indent=12)
+            elif "|" in line:
+                write_text(line, 10, font_bold)
             else:
-                write(line)
+                write_text(line, 10, font_reg)
 
-    # -------------------------
-    # PROJECTS
-    # -------------------------
+        y += 10
 
-    if "PROJECTS" in sections:
-        section("PROJECTS")
-        for line in sections["PROJECTS"]:
-            if line.startswith("*"):
-                write("• " + line.lstrip("*- "), indent=12)
-            else:
-                write(line)
+    doc.save(output_filename)
+    print(f"PDF generated: {output_filename}")
 
-    doc.save(out_path)
+
+def generate_resume_pdf_from_text(raw_text: str, profile: dict, output_path: str):
+    parsed = parse_resume_robust(raw_text)
+    create_resume_pdf(parsed, profile, output_path)

@@ -27,4 +27,26 @@ def build_candidate_details(profile: dict) -> str:
     if profile.get("primary_keyword"):
         lines.append(f"Primary Keyword: {profile['primary_keyword']}")
 
+    education = profile.get("education", {})
+    if any(education.values()):
+        lines.append("Education:")
+        if education.get("degree"):
+            lines.append(f"- Degree: {education['degree']}")
+        if education.get("university"):
+            lines.append(f"- University: {education['university']}")
+        if education.get("year"):
+            lines.append(f"- Graduation Year: {education['year']}")
+
+    experience = profile.get("profile_experience", {})
+    if any(experience.values()):
+        lines.append("Experience:")
+        if experience.get("company"):
+            lines.append(f"- Company: {experience['company']}")
+        if experience.get("position"):
+            lines.append(f"- Position: {experience['position']}")
+        if experience.get("type"):
+            lines.append(f"- Employment type: {experience['type']}")
+        if experience.get("years"):
+            lines.append(f"- Working Years: {experience['years']}")
+
     return "\n".join(lines)
