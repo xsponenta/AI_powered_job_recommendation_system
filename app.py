@@ -12,7 +12,8 @@ import os
 from core.rag_engine import recommender
 from core.cv_generator import generate_cv
 from core.pdf_writer import generate_resume_pdf_from_text
-from core.storage import save_profile, load_profile, list_profiles, save_cv_history
+from core.storage import save_profile, load_profile, list_profiles,\
+    save_cv_history, load_latest_profile, merge_with_fallback
 
 def make_scrollable(widget: QWidget) -> QWidget:
     scroll = QScrollArea()
@@ -44,20 +45,29 @@ class JobWorker(QThread):
 
 
 class CVWorker(QThread):
-    finished = Signal(str, str)
+    finished = Signal(str, str, list)
 
     def __init__(self, profile: dict):
         super().__init__()
         self.profile = profile
 
     def run(self):
-        raw_text = generate_cv(self.profile)
+        filled_fields = []
+
+        fallback = load_latest_profile()
+        final_profile = self.profile
+
+        if fallback:
+            final_profile, filled_fields = merge_with_fallback(
+                self.profile, fallback
+            )
+
+        raw_text = generate_cv(final_profile)
 
         output_path = "generated_resume.pdf"
-        generate_resume_pdf_from_text(raw_text, self.profile, output_path)
+        generate_resume_pdf_from_text(raw_text, final_profile, output_path)
 
-        self.finished.emit(output_path, raw_text)
-
+        self.finished.emit(output_path, raw_text, filled_fields)
 
 
 class ProfileTab(QWidget):
@@ -398,10 +408,18 @@ class CVTab(QWidget):
         self.worker.finished.connect(self.on_result_ready)
         self.worker.start()
 
-    def on_result_ready(self, pdf_path: str, raw_text: str):
+    def on_result_ready(self, pdf_path: str, raw_text: str, filled_fields: list):
         self.pdf_path = os.path.abspath(pdf_path)
 
-        self.status.setText("CV generated successfully ✔")
+        msg = "CV generated successfully"
+
+        if filled_fields:
+            msg += (
+                "\n\n⚠ Some empty fields were auto-filled from your last profile:\n"
+                + "\n".join(f"• {f}" for f in filled_fields)
+            )
+
+        self.status.setText(msg)
         self.path_label.setText(f"<b>Saved to:</b><br>{self.pdf_path}")
         self.raw_preview.setPlainText(raw_text)
 
@@ -414,6 +432,7 @@ class CVTab(QWidget):
             profile_name=self.profile_tab.position.text() or "default",
             raw_text=raw_text
         )
+
 
     def recompile_pdf(self):
         edited_text = self.raw_preview.toPlainText().strip()
