@@ -1,3 +1,4 @@
+
 ## AI Job Recommender & CV Generator
 
 
@@ -185,3 +186,7 @@ We used datasets from huggingface to fine-tune the models:
 
 https://huggingface.co/datasets/lang-uk/recruitment-dataset-candidate-profiles-english
 
+### Usage video
+
+<video src="https://github.com/user/repo/assets/video_file.mp4](https://github.com/xsponenta/AI_powered_job_recommendation_system/blob/main/usage.mp4" controls="controls" style="max-width: 730px;">
+</video>
