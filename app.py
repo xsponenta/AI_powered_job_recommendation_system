@@ -295,11 +295,17 @@ class CVTab(QWidget):
         )
 
         self.raw_preview = QTextEdit()
-        self.raw_preview.setReadOnly(True)
+        self.raw_preview.setReadOnly(False)
         self.raw_preview.setPlaceholderText("Raw model output will appear here…")
 
         layout.addWidget(QLabel("Model Output (Debug)"))
         layout.addWidget(self.raw_preview)
+
+        self.recompile_btn = QPushButton("Recompile PDF from Edited Text")
+        self.recompile_btn.setEnabled(False)
+        self.recompile_btn.clicked.connect(self.recompile_pdf)
+
+        layout.addWidget(self.recompile_btn)
 
 
         self.open_btn = QPushButton("Open PDF")
@@ -341,6 +347,30 @@ class CVTab(QWidget):
         self.raw_preview.setPlainText(raw_text)
 
         self.generate_btn.setEnabled(True)
+        self.open_btn.setEnabled(True)
+        self.folder_btn.setEnabled(True)
+        self.recompile_btn.setEnabled(True)
+
+    def recompile_pdf(self):
+        edited_text = self.raw_preview.toPlainText().strip()
+        if not edited_text:
+            self.status.setText("Cannot recompile: raw text is empty")
+            return
+
+        self.status.setText("Recompiling PDF from edited text…")
+
+        output_path = "generated_resume.pdf"
+
+        generate_resume_pdf_from_text(
+            edited_text,
+            self.profile_tab.get_profile(),
+            output_path
+        )
+
+        self.pdf_path = os.path.abspath(output_path)
+        self.status.setText("PDF recompiled successfully")
+        self.path_label.setText(f"<b>Saved to:</b><br>{self.pdf_path}")
+
         self.open_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
 

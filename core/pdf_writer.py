@@ -91,27 +91,22 @@ def create_resume_pdf(parsed_data, profile: dict, output_filename="generated_res
             page = doc.new_page()
             y = margin_top
 
-    def write_text(text, size=10, font=font_reg, indent=0):
+    def write_text(text, size, font, is_bullet=False, indent=0):
         nonlocal y
         text = clean_text_for_pdf(text)
-        rect = fitz.Rect(
-            margin_left + indent,
-            y,
-            width - margin_right,
-            height - 50,
-        )
-
-        check_page_break()
-
-        page.insert_textbox(
-            rect,
-            text,
-            fontsize=size,
-            fontname=font,
-            align=0,
-        )
-
-        y += size * (text.count("\n") + 1) * 1.5
+        rect = fitz.Rect(margin_left + indent, y, width - margin_right, height - 50)
+        check_page_break(20)
+        try:
+            rc = page.insert_textbox(rect, text, fontsize=size, fontname=font, align=0)
+        except:
+            rc = page.insert_textbox(rect, text, fontsize=size, align=0)
+        line_length = (width - margin_left - margin_right - indent) / (size * 0.5)
+        if len(text) == 0: 
+            lines_count = 1
+        else:
+            lines_count = (len(text) / line_length) + 1
+        height_inc = lines_count * size * 1.4
+        y += height_inc + 1
 
     full_name = profile.get("full_name", "")
     if full_name:
