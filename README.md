@@ -175,6 +175,7 @@ python app.py
 
 
 ### Experiments & Research
+
 The `experiments/` folder contains:
 
 - Gemma fine-tuning notebooks
@@ -188,5 +189,4 @@ https://huggingface.co/datasets/lang-uk/recruitment-dataset-candidate-profiles-e
 
 ### Usage video
 
-<video src="https://github.com/xsponenta/AI_powered_job_recommendation_system/raw/main/usage.mp4" controls="controls" style="max-width: 730px;">
-</video>
+https://github.com/user-attachments/assets/876d6843-163e-4c58-8c90-823b38ddf132
