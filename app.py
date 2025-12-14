@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QTabWidget,
     QVBoxLayout, QLabel, QLineEdit, QTextEdit,
     QPushButton, QTableWidget, QTableWidgetItem, 
-    QProgressBar, QScrollArea, QCheckBox, QGroupBox
+    QProgressBar, QScrollArea, QCheckBox, QGroupBox, QComboBox
 )
 from PySide6.QtCore import QThread, Signal, QUrl, Qt
 from PySide6.QtGui import QDesktopServices
@@ -12,6 +12,7 @@ import os
 from core.rag_engine import recommender
 from core.cv_generator import generate_cv
 from core.pdf_writer import generate_resume_pdf_from_text
+from core.storage import save_profile, load_profile, list_profiles, save_cv_history
 
 def make_scrollable(widget: QWidget) -> QWidget:
     scroll = QScrollArea()
@@ -81,6 +82,21 @@ class ProfileTab(QWidget):
         self.grad_year = QLineEdit()
         self.has_experience = QCheckBox("I have professional work experience")
         self.has_experience.setChecked(False)
+
+        self.profile_selector = QComboBox()
+        self.profile_selector.addItems(list_profiles())
+
+        self.save_profile_btn = QPushButton("Save Profile")
+        self.save_profile_btn.clicked.connect(self.save_current_profile)
+
+        self.load_profile_btn = QPushButton("Load Profile")
+        self.load_profile_btn.clicked.connect(self.load_selected_profile)
+
+        layout.addWidget(QLabel("Saved Profiles"))
+        layout.addWidget(self.profile_selector)
+        layout.addWidget(self.save_profile_btn)
+        layout.addWidget(self.load_profile_btn)
+
 
         layout.addWidget(QLabel("Full Name"))
         layout.addWidget(self.full_name)
@@ -194,6 +210,49 @@ class ProfileTab(QWidget):
             "primary_keyword": self.primary_keyword.text().strip(),
         }
 
+    def save_current_profile(self):
+        name = self.position.text().strip().lower().replace(" ", "_") or "default"
+        save_profile(name, self.get_profile())
+        self.profile_selector.clear()
+        self.profile_selector.addItems(list_profiles())
+
+
+    def load_selected_profile(self):
+        name = self.profile_selector.currentText()
+        if not name:
+            return
+        data = load_profile(name)
+        self.populate_profile(data)
+
+    def populate_profile(self, profile: dict):
+        self.full_name.setText(profile.get("full_name", ""))
+        self.location.setText(profile.get("location", ""))
+        self.email.setText(profile.get("email", ""))
+        self.phone.setText(profile.get("phone", ""))
+        self.linkedin.setText(profile.get("linkedin", ""))
+        self.github.setText(profile.get("github", ""))
+
+        edu = profile.get("education", {})
+        self.degree.setText(edu.get("degree", ""))
+        self.university.setText(edu.get("university", ""))
+        self.grad_year.setText(edu.get("year", ""))
+
+        self.position.setText(profile.get("position", ""))
+        self.skills.setPlainText(profile.get("skills", ""))
+        self.summary.setPlainText(profile.get("summary", ""))
+        self.looking_for.setPlainText(profile.get("looking_for", ""))
+        self.highlights.setPlainText(profile.get("highlights", ""))
+        self.primary_keyword.setText(profile.get("primary_keyword", ""))
+
+        has_exp = profile.get("has_experience", False)
+        self.has_experience.setChecked(has_exp)
+        self.exp_group.setVisible(has_exp)
+
+        exp = profile.get("profile_experience") or {}
+        self.company.setText(exp.get("company", ""))
+        self.job_title.setText(exp.get("position", ""))
+        self.employment_type.setText(exp.get("type", ""))
+        self.years.setText(exp.get("years", ""))
 
 class JobsTab(QWidget):
     def __init__(self, profile_tab: ProfileTab):
@@ -350,6 +409,11 @@ class CVTab(QWidget):
         self.open_btn.setEnabled(True)
         self.folder_btn.setEnabled(True)
         self.recompile_btn.setEnabled(True)
+
+        save_cv_history(
+            profile_name=self.profile_tab.position.text() or "default",
+            raw_text=raw_text
+        )
 
     def recompile_pdf(self):
         edited_text = self.raw_preview.toPlainText().strip()

@@ -5,3 +5,5 @@ myenv/
 venv/
 
 data/
+
+.cv_app/
