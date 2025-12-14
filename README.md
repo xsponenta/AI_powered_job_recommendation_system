@@ -188,5 +188,5 @@ https://huggingface.co/datasets/lang-uk/recruitment-dataset-candidate-profiles-e
 
 ### Usage video
 
-<video src="https://github.com/xsponenta/AI_powered_job_recommendation_system/blob/main/usage.mp4" controls="controls" style="max-width: 730px;">
+<video src="https://github.com/xsponenta/AI_powered_job_recommendation_system/raw/main/usage.mp4" controls="controls" style="max-width: 730px;">
 </video>
